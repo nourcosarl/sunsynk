@@ -104,8 +104,6 @@ class pySunsynk(Sunsynk):  # pylint: disable=invalid-name
         )
         if res.function_code >= 0x80:  # test that we are not an error
             raise Exception(
-                "failed to read register %s - function code: %s",
-                start,
-                res.function_code,
+                f"failed to read register {start} - function code: {res.function_code}"
             )
         return res.registers
