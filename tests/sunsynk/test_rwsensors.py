@@ -145,3 +145,17 @@ def test_time_rw() -> None:
     s_min.reg_to_value(200)
     s.max.reg_to_value(200)
     assert s.available_values(15) == ["2:00"]
+
+
+def test_update_sensor(caplog) -> None:
+    s = NumberRWSensor(60, "two", factor=0.1)
+    assert s.value is None
+    update_sensors([s], {})
+    assert s.value is None
+    update_sensors([s], {60: 10})
+    assert s.value == 1
+
+
+def test_bad_sensor(caplog) -> None:
+    NumberRWSensor((60, 1), "two", factor=0.1, bitmask=1)
+    assert "single register" in caplog.text

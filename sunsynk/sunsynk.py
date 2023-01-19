@@ -21,6 +21,7 @@ class Sunsynk:
     server_id: int = attr.ib(default=1)
     timeout: int = attr.ib(default=10)
     read_sensors_batch_size: int = attr.field(default=60)
+    timeouts: int = 0
 
     async def connect(self) -> None:
         """Connect."""
@@ -65,16 +66,19 @@ class Sunsynk:
             sensors, allow_gap=1, max_group_size=self.read_sensors_batch_size
         ):
             glen = grp[-1] - grp[0] + 1
-
             try:
-                r_r = await self.read_holding_registers(grp[0], glen)
+                r_r = await asyncio.wait_for(
+                    self.read_holding_registers(grp[0], glen), timeout=self.timeout + 1
+                )
+            except asyncio.TimeoutError:
+                _LOGGER.error("timeout reading register %s (%s)", grp[0], glen)
+                self.timeouts += 1
+                raise
             except Exception as err:  # pylint: disable=broad-except
                 raise Exception(  # pylint: disable=raise-missing-from
                     f"({self.server_id},{grp[0]},{glen}) {err}"
                 )
 
-            # if r_r.function_code >= 0x80:  # test that we are not an error
-            #    raise Exception("failed to read")
             regs = register_map(grp[0], r_r)
             all_regs.update(regs)
 

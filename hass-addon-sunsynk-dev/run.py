@@ -8,8 +8,9 @@ from collections import defaultdict
 from json import loads
 from math import modf
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Sequence, Tuple
+from typing import Any, Callable, Sequence, Tuple, Union
 
+import attr
 import yaml
 from filter import RROBIN, Filter, getfilter, suggested_filter
 from mqtt import (
@@ -33,13 +34,48 @@ _LOGGER = logging.getLogger(__name__)
 
 
 DEVICE: Device = None  # type:ignore
-HASS_DISCOVERY_INFO_UPDATE_QUEUE: Dict[str, Filter] = {}
+HASS_DISCOVERY_INFO_UPDATE_QUEUE: dict[str, Filter] = {}
 HIDDEN_SENSOR_IDS: set[str] = set()
-SENSORS: List[Filter] = []
-SENSOR_WRITE_QUEUE: Dict[str, Tuple[Filter, Any]] = {}
+SENSORS: list[Filter] = []
+SENSOR_WRITE_QUEUE: dict[str, Tuple[Filter, Any]] = {}
 SERIAL = ALL_SENSORS["serial"]
-STARTUP_SENSORS: List[Sensor] = []
+STARTUP_SENSORS: list[Sensor] = []
 SUNSYNK: Sunsynk = None  # type: ignore
+
+
+@attr.define(slots=True)
+class MQTTsensor:
+    entity: Entity = attr.field()
+    last: Union[int, str] = attr.field(default=0)
+
+
+ADDON_STATS: dict[str, MQTTsensor] = {}
+
+
+async def addon_stats_publish() -> None:
+    """Publish stats to MQTT."""
+    if SUNSYNK.timeouts != ADDON_STATS["to"].last:
+        await MQTT.connect(OPT)
+        await MQTT.publish(
+            topic=ADDON_STATS["to"].entity.state_topic,
+            payload=tostr(SUNSYNK.timeouts),
+            retain=True,
+        )
+        ADDON_STATS["to"].last = SUNSYNK.timeouts
+
+
+def addon_stats_discover() -> list[Entity]:
+    """MQTT entities for stats."""
+    ADDON_STATS["to"] = MQTTsensor(
+        entity=SensorEntity(
+            name=f"{OPT.sensor_prefix} RS485 timeouts",
+            unique_id=f"{OPT.sunsynk_id}_timeouts",
+            state_topic=f"{SS_TOPIC}/{OPT.sunsynk_id}/timeouts",
+            entity_category="config",
+            device=DEVICE,
+        )
+    )
+    return [ADDON_STATS["to"].entity]
 
 
 def tostr(val: Any) -> str:
@@ -53,7 +89,7 @@ def tostr(val: Any) -> str:
     return f"{val:.3f}".rstrip("0")
 
 
-async def publish_sensors(sensors: List[Filter], *, force: bool = False) -> None:
+async def publish_sensors(sensors: list[Filter], *, force: bool = False) -> None:
     """Publish sensors."""
     res = None
     for fsen in sensors:
@@ -65,10 +101,12 @@ async def publish_sensors(sensors: List[Filter], *, force: bool = False) -> None
             continue
         await MQTT.connect(OPT)
         await MQTT.publish(
-            topic=f"{SS_TOPIC}/{OPT.sunsynk_id}/{fsen.sensor.id}",
+            topic=fsen.sensor.state_topic,  # f"{SS_TOPIC}/{OPT.sunsynk_id}/{fsen.sensor.id}",
             payload=tostr(res),
             retain=isinstance(fsen.sensor, RWSensor),  # where entity_category="config"
         )
+
+    await addon_stats_publish()
 
 
 async def hass_discover_sensors(serial: str, rated_power: float) -> None:
@@ -83,12 +121,13 @@ async def hass_discover_sensors(serial: str, rated_power: float) -> None:
     DEVICE = dev
 
     ents = create_entities(SENSORS, dev)
+    ents.extend(addon_stats_discover())
 
     await MQTT.connect(OPT)
     await MQTT.publish_discovery_info(entities=ents)
 
 
-def enqueue_hass_discovery_info_update(changed_sen: Sensor, deps: List[Filter]) -> None:
+def enqueue_hass_discovery_info_update(changed_sen: Sensor, deps: list[Filter]) -> None:
     """Add a sensor's dependants to the HASS discovery info update queue."""
     if not DEVICE:
         return
@@ -120,7 +159,7 @@ async def hass_update_discovery_info() -> None:
 
 def create_entities(sensors: list[Filter], dev: Device) -> list[Entity]:
     """Create HASS entities out of an existing list of filters"""
-    ents: List[Entity] = []
+    ents: list[Entity] = []
 
     def create_on_change_handler(filt: Filter, value_func: Callable) -> Callable:
         def _handler(value: Any) -> None:
@@ -186,8 +225,6 @@ def create_entities(sensors: list[Filter], dev: Device) -> list[Entity]:
                 )
             )
             continue
-
-        ents.append(SensorEntity(**ent))
 
     return ents
 
@@ -274,11 +311,11 @@ TEST_SENSORS = (
 
 def setup_sensors() -> None:
     """Setup the sensors."""
-    sens: Dict[str, Filter] = {}
-    sens_dependants: Dict[str, List[Sensor]] = defaultdict(list)
+    sens: dict[str, Filter] = {}
+    sens_dependants: dict[str, list[Sensor]] = defaultdict(list)
     startup_sens = {SERIAL.id, RATED_POWER.id}
 
-    msg: Dict[str, List[str]] = defaultdict(list)
+    msg: dict[str, list[str]] = defaultdict(list)
 
     for sensor_def in OPT.sensors:
         name, _, fstr = sensor_def.partition(":")
@@ -349,14 +386,11 @@ async def read_sensors(
     """Read from the Modbus interface."""
     global READ_ERRORS  # pylint:disable=global-statement
     try:
-        try:
-            await asyncio.wait_for(SUNSYNK.read_sensors(sensors), OPT.timeout)
-            READ_ERRORS = 0
-            return True
-        except asyncio.TimeoutError:
-            _LOGGER.error("Timeout reading: %s", msg)
-        # except KeyError:
-        #     _LOGGER.error("Read error%s: Timeout", msg)
+        await SUNSYNK.read_sensors(sensors)
+        READ_ERRORS = 0
+        return True
+    except asyncio.TimeoutError:
+        pass
     except Exception as err:  # pylint:disable=broad-except
         _LOGGER.error("Read Error%s: %s", msg, err)
         READ_ERRORS += 1
