@@ -44,12 +44,14 @@ SUNSYNK: Sunsynk = None  # type: ignore
 
 
 @attr.define(slots=True)
-class MQTTsensor:
+class MQTTEntity:  # pylint: disable=too-few-public-methods
+    """An Entity and a value."""
+
     entity: Entity = attr.field()
     last: Union[int, str] = attr.field(default=0)
 
 
-ADDON_STATS: dict[str, MQTTsensor] = {}
+ADDON_STATS: dict[str, MQTTEntity] = {}
 
 
 async def addon_stats_publish() -> None:
@@ -66,7 +68,7 @@ async def addon_stats_publish() -> None:
 
 def addon_stats_discover() -> list[Entity]:
     """MQTT entities for stats."""
-    ADDON_STATS["to"] = MQTTsensor(
+    ADDON_STATS["to"] = MQTTEntity(
         entity=SensorEntity(
             name=f"{OPT.sensor_prefix} RS485 timeouts",
             unique_id=f"{OPT.sunsynk_id}_timeouts",
