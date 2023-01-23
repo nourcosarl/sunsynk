@@ -8,6 +8,7 @@ EXIT /B %ERRORLEVEL%
 :copy2
 echo # Copy '%~1' to '%~2'
 xcopy /Y %~1 %~2
+del %~2\.local.yaml
 xcopy /Y setup.* %~2\sunsynk\
 xcopy /Y README.md %~2\sunsynk\
 xcopy /Y sunsynk %~2\sunsynk\sunsynk\

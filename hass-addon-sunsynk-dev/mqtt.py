@@ -76,7 +76,7 @@ class Entity:
     def asdict(self) -> Dict:
         """Represent the entity as a dictionary, without empty values and defaults."""
 
-        def _filter(atrb: Any, value: Any) -> bool:
+        def _filter(atrb: attr.Attribute, value: Any) -> bool:
             return (
                 bool(value) and atrb.default != value and not inspect.isfunction(value)
             )
@@ -226,6 +226,9 @@ class MQTTClient:
 
         task_remove = None
         if remove_entities:
+            _LOGGER.debug(
+                "Remove entities %s", [e.name if e else str(e) for e in entities]
+            )
             task_remove = asyncio.create_task(
                 self.remove_discovery_info(
                     device_ids=list(set(e.device.id for e in entities)),

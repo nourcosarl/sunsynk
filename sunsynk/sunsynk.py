@@ -7,7 +7,8 @@ import attr
 
 from sunsynk.helpers import patch_bitmask
 from sunsynk.rwsensors import RWSensor
-from sunsynk.sensors import Sensor, group_sensors
+from sunsynk.sensors import Sensor, ValType
+from sunsynk.state import InverterState, group_sensors, register_map
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 class Sunsynk:
     """Sunsync Modbus class."""
 
+    state: InverterState = attr.field(factory=InverterState)
     port: str = attr.ib(default="/dev/tty0")
     baudrate: int = attr.ib(default=9600)
     server_id: int = attr.ib(default=1)
@@ -31,29 +33,34 @@ class Sunsynk:
         """Write to a register - Sunsynk support function code 0x10."""
         raise NotImplementedError
 
-    async def write_sensor(self, sensor: RWSensor, *, msg: str = "") -> None:
+    async def write_sensor(
+        self, sensor: RWSensor, value: ValType, *, msg: str = ""
+    ) -> None:
         """Write a sensor."""
-        val1 = sensor.reg_value[0]
+        regs = sensor.value_to_reg(value, self.state.get)
         # if bitmask we should READ the register first!!!
         if sensor.bitmask:
-            r_r = await self.read_holding_registers(sensor.reg_address[0], 1)
+            val1 = regs[0]
+            regs = sensor.check_bitmask(value, regs)
+            r_r = await self.read_holding_registers(sensor.address[0], 1)
             val0 = r_r[0]
-            val1 = patch_bitmask(val0, val1, sensor.bitmask)
+            regs = list(regs)
+            regs[0] = patch_bitmask(val0, val1, sensor.bitmask)
             msg = f"[Register {val0}-->{val1}]"
 
-        _LOGGER.info(
-            "Writing sensor %s: %s=%s %s",
-            sensor.name,
+        _LOGGER.critical(
+            "Writing sensor %s=%s [%s=%s] %s",
             sensor.id,
-            sensor.reg_value,
+            value,
+            sensor.address,
+            regs,
             msg,
         )
-        await self.write_register(address=sensor.reg_address[0], value=val1)
-        for idx in range(len(sensor.reg_address) - 1):
-            await asyncio.sleep(0.05)
-            await self.write_register(
-                address=sensor.reg_address[idx], value=sensor.reg_value[idx]
-            )
+        for idx, addr in enumerate(sensor.address):
+            if idx:
+                await asyncio.sleep(0.05)
+            await self.write_register(address=addr, value=regs[idx])
+            self.state.registers[addr] = regs[idx]
 
     async def read_holding_registers(self, start: int, length: int) -> Sequence[int]:
         """Read a holding register."""
@@ -61,6 +68,7 @@ class Sunsynk:
 
     async def read_sensors(self, sensors: Sequence[Sensor]) -> None:
         """Read a list of sensors - Sunsynk supports function code 0x03."""
+        assert self.state is not None
         all_regs: Dict[int, int] = {}
         for grp in group_sensors(
             sensors, allow_gap=1, max_group_size=self.read_sensors_batch_size
@@ -96,22 +104,5 @@ class Sunsynk:
                 regs,
             )
 
-        update_sensors(sensors, all_regs)
-
-
-def register_map(start: int, registers: Sequence[int]) -> Dict[int, int]:
-    """Turn the registers into a dictionary or map."""
-    return {start + i: r for (i, r) in enumerate(registers)}
-
-
-def update_sensors(sensors: Sequence[Sensor], registers: Dict[int, int]) -> None:
-    """Update sensors."""
-    for sen in sensors:
-        try:
-            if isinstance(sen, RWSensor) and sen.bitmask:
-                sen.reg_value = (registers[sen.reg_address[0]] & sen.bitmask,)
-            else:
-                sen.reg_value = tuple(registers[i] for i in sen.reg_address)
-        except KeyError:
-            continue
-        sen.update_value()
+        self.state.update(all_regs)
+        # update_sensors(sensors, all_regs)

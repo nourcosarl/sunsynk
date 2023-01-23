@@ -22,8 +22,10 @@ options:
   PORT: ""
   DEVICE: ""
   DRIVER: "umodbus"
-  SUNSYNK_ID: "007"
-  SENSOR_PREFIX: ""
+  INVERTERS:
+    - SERIAL: "007"
+      PREFIX: SS
+      MODBUS_ID: 1
   SENSORS:
     - total_pv_power
     - total_battery_charge
@@ -33,8 +35,6 @@ options:
     - battery_soc
   READ_SENSORS_BATCH_SIZE: 60
   NUMBER_ENTITY_MODE: "auto"
-  PROFILES: []
-  MODBUS_SERVER_ID: 1
   MQTT_HOST: core-mosquitto
   MQTT_PORT: 1883
   MQTT_USERNAME: hass
@@ -44,15 +44,14 @@ schema:
   PORT: str?
   DEVICE: device(subsystem=tty)?
   DRIVER: str?
-  SUNSYNK_ID: str
-  SENSOR_PREFIX: str
+  INVERTERS:
+    - SERIAL: str
+      PREFIX: str
+      MODBUS_ID: int
   SENSORS:
     - str
   READ_SENSORS_BATCH_SIZE: int?
   NUMBER_ENTITY_MODE: list(auto|box|slider)?
-  PROFILES:
-    - str
-  MODBUS_SERVER_ID: int
   MQTT_HOST: str
   MQTT_PORT: port
   MQTT_USERNAME: str

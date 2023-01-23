@@ -144,12 +144,12 @@ def test_rr(filters):
     fil = [filters.getfilter("round_robin", s) for s in sen]
 
     for idx in range(2):
-        assert fil[idx].sensor is sen[idx]
-    assert RROBIN.list == list(sen)
+        assert fil[idx].sensor_name is sen[idx].name
+    assert RROBIN.list == list(fil)
 
     assert [RROBIN.idx, RROBIN.active] == [-1, []]
     RROBIN.tick()
-    assert [RROBIN.idx, RROBIN.active] == [0, [sen[0]]]
+    assert [RROBIN.idx, RROBIN.active] == [0, [fil[0]]]
 
     # Cycle through should_update()
     assert [f.should_update() for f in fil] == [True, False, False]

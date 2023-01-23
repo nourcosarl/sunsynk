@@ -23,7 +23,8 @@ class Filter:
     values: List[Any] = attr.field(default=None)
     samples: int = attr.field(default=1)
     _filter: Any = attr.field(default=mean)
-    sensor: Any = attr.field(default=None)
+    # sensor: Any = attr.field(default=None)
+    sensor_name: str = attr.field(default="")
 
     def should_update(self) -> bool:
         """Should we update this sensor."""
@@ -36,7 +37,7 @@ class Filter:
     @property
     def name(self) -> str:
         """Return the name of the sensor and filter."""
-        nme = getattr(self.sensor, "name", str(self.sensor))
+        nme = self.sensor_name
         if isinstance(self, SCFilter):
             nme += ":step"
         return f"{nme}:{self._filter.__name__}"  # pylint: disable=no-member
@@ -103,8 +104,8 @@ class RRobinState:
     """Round Robin settings."""
 
     # pylint: disable=too-few-public-methods
-    active: List[Sensor] = attr.field(factory=list)
-    list: List[Sensor] = attr.field(factory=list)
+    active: List[Filter] = attr.field(factory=list)
+    list: List[Filter] = attr.field(factory=list)
     idx: int = attr.field(default=-1)
 
     def tick(self) -> None:
@@ -128,7 +129,7 @@ class RoundRobinFilter(Filter):
 
     def should_update(self) -> bool:
         """Should we update this sensor."""
-        return self.sensor in RROBIN.active
+        return self in RROBIN.active
 
     def update(self, value: Union[float, int, str]) -> Optional[Union[float, int, str]]:
         """Add value."""
@@ -148,19 +149,23 @@ class RoundRobinFilter(Filter):
 
     def __attrs_post_init__(self) -> None:
         """Init."""
-        RROBIN.list.append(self.sensor)
+        RROBIN.list.append(self)
 
 
 def getfilter(filter_def: str, sensor: Sensor) -> Filter:
     """Get a filter from a filterstring."""
     fff = filter_def.split(":")
 
+    sensor_name = "" if sensor is None else sensor.name
+
     if fff[0] == "round_robin":
-        return RoundRobinFilter(sensor=sensor)
+        return RoundRobinFilter(sensor_name=sensor_name)
 
     funcs = {"min": min, "max": max, "mean": mean, "avg": mean}
     if fff[0] in funcs:
-        res = Filter(interval=10, samples=6, filter=funcs[fff[0]], sensor=sensor)
+        res = Filter(
+            interval=10, samples=6, filter=funcs[fff[0]], sensor_name=sensor_name
+        )
         return res
 
     if fff[0] == "last":
@@ -168,11 +173,11 @@ def getfilter(filter_def: str, sensor: Sensor) -> Filter:
         def last(val: Sequence[int]) -> int:
             return val[-1]
 
-        res = Filter(interval=60, samples=1, filter=last, sensor=sensor)
+        res = Filter(interval=60, samples=1, filter=last, sensor_name=sensor_name)
         return res
 
     if fff[0] == "now":
-        res = Filter(interval=2, samples=1, filter=max, sensor=sensor)
+        res = Filter(interval=2, samples=1, filter=max, sensor_name=sensor_name)
         return res
 
     if fff and fff[0] != "step":
@@ -186,7 +191,9 @@ def getfilter(filter_def: str, sensor: Sensor) -> Filter:
     except ValueError as err:
         _LOGGER.error("Bad threshold: %s - %s", fff[1], err)
 
-    return SCFilter(interval=1, samples=60, filter=mean, sensor=sensor, threshold=thr)
+    return SCFilter(
+        interval=1, samples=60, filter=mean, sensor_name=sensor_name, threshold=thr
+    )
 
 
 def suggested_filter(sensor: Sensor) -> str:

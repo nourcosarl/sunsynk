@@ -2,7 +2,7 @@
 import asyncio
 import logging
 from types import ModuleType
-from unittest.mock import patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -64,7 +64,6 @@ def test_mqtt_entity(mqtt):
     assert ent.topic == "homeassistant/sensor/123/789/config"
 
 
-@pytest.mark.skip
 @pytest.mark.asyncio
 @pytest.mark.mqtt
 async def test_mqtt_server(mqtt):
@@ -185,3 +184,31 @@ async def test_mqtt_discovery(mqtt):
 
     await mqt.disconnect()
     await asyncio.sleep(0.1)
+
+
+@pytest.mark.asyncio
+@patch("mqtt.Client")
+async def test_connect(client: Mock, mqtt, caplog):
+    """Test connect."""
+    mmock = MagicMock()
+    mmock.is_connected.side_effect = [False, False, True]
+
+    client.return_value = mmock
+    cl = mqtt.MQTTClient()
+
+    # assert not mmock.is_connected()
+    # assert not cl._client.is_connected()
+    # assert cl._client == cmock
+
+    _LOGGER.error(dir(client))
+    assert isinstance(cl._client, Mock)
+
+    await cl.connect(None)
+
+    assert 3 == mmock.is_connected.call_count
+
+    mmock.is_connected.assert_called()
+
+    assert "Connection" not in caplog.text
+    mqtt._mqtt_on_connect(None, None, None, 1)
+    # assert "Connection" in caplog.text

@@ -1,6 +1,6 @@
 """Helper functions."""
 from math import modf
-from typing import Any, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 
 def ensure_tuple(val: Any) -> Tuple[int]:
@@ -35,11 +35,25 @@ def slug(name: str) -> str:
 class SSTime:
     """Deals with inverter time format conversion complexities."""
 
-    minutes: int
+    minutes: int = 0
 
-    def __init__(self, minutes: int = 0) -> None:
-        """Init the time with minutes."""
-        self.minutes = minutes
+    def __init__(
+        self,
+        *,
+        minutes: Optional[int] = None,
+        register: Optional[int] = None,
+        string: Optional[str] = None,
+    ) -> None:
+        """Init the time. All mutually exclusive."""
+        if minutes is not None:
+            assert register is None
+            assert string is None
+            self.minutes = minutes
+        elif register is not None:
+            assert string is None
+            self.reg_value = register
+        elif string is not None:
+            self.str_value = string
 
     @property
     def reg_value(self) -> int:

@@ -1,0 +1,1 @@
+pytest --cov --cov-report=xml -- tests\sunsynk tests\hass-addon-sunsynk-dev
