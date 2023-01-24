@@ -1,17 +1,19 @@
 """Sensor classes represent modbus registers for an inverter."""
-# from __future__ import annotations
-
 import logging
-from typing import Union
 
 import attr
 
-from sunsynk.helpers import ensure_tuple, int_round, signed, slug
+from sunsynk.helpers import (
+    NumType,
+    RegType,
+    ValType,
+    ensure_tuple,
+    int_round,
+    signed,
+    slug,
+)
 
 _LOGGER = logging.getLogger(__name__)
-
-ValType = Union[float, int, str, None]
-RegType = tuple[int, ...]
 
 
 @attr.define(slots=True)
@@ -32,10 +34,10 @@ class Sensor:
 
     def reg_to_value(self, regs: RegType) -> ValType:
         """Return the value from the registers."""
-        val: ValType = regs[0]
+        val: NumType = regs[0]
         if len(regs) == 2:
             val += regs[1] << 16
-        elif self.factor < 0:  # Indicate this register is signed
+        elif self.factor < 0:  # Indicates this register is signed
             val = signed(val)
         val = int_round(val * abs(self.factor))
         _LOGGER.debug("%s=%s%s %s", self.id, val, self.unit, regs)
@@ -63,9 +65,9 @@ class MathSensor(Sensor):
     def reg_to_value(self, regs: RegType) -> ValType:
         """Calculate the math value."""
         val = int_round(sum(signed(i) * s for i, s in zip(regs, self.factors)))
-        if self.absolute and not isinstance(val, str) and val < 0:
+        if self.absolute and val < 0:
             val = -val
-        if self.no_negative and not isinstance(val, str) and val < 0:
+        if self.no_negative and val < 0:
             val = 0
         return val
 

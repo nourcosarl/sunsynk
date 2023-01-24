@@ -1,7 +1,7 @@
 """Sunsync Modbus interface."""
 import asyncio
 import logging
-from typing import Dict, Sequence
+from typing import Iterable, Sequence
 
 import attr
 
@@ -44,8 +44,8 @@ class Sunsynk:
             regs = sensor.check_bitmask(value, regs)
             r_r = await self.read_holding_registers(sensor.address[0], 1)
             val0 = r_r[0]
-            regs = list(regs)
-            regs[0] = patch_bitmask(val0, val1, sensor.bitmask)
+            regs0 = patch_bitmask(val0, val1, sensor.bitmask)
+            regs = (regs0,) + regs[1:]
             msg = f"[Register {val0}-->{val1}]"
 
         _LOGGER.critical(
@@ -66,10 +66,10 @@ class Sunsynk:
         """Read a holding register."""
         raise NotImplementedError
 
-    async def read_sensors(self, sensors: Sequence[Sensor]) -> None:
+    async def read_sensors(self, sensors: Iterable[Sensor]) -> None:
         """Read a list of sensors - Sunsynk supports function code 0x03."""
         assert self.state is not None
-        all_regs: Dict[int, int] = {}
+        all_regs: dict[int, int] = {}
         for grp in group_sensors(
             sensors, allow_gap=1, max_group_size=self.read_sensors_batch_size
         ):

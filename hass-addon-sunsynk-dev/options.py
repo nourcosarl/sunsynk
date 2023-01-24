@@ -1,4 +1,6 @@
 """Addon options."""
+from __future__ import annotations
+
 import logging
 from json import loads
 from pathlib import Path
@@ -6,9 +8,25 @@ from pathlib import Path
 import attr
 import yaml
 
-from sunsynk.helpers import slug
-
 _LOGGER = logging.getLogger(__name__)
+
+
+@attr.define(slots=True)
+class InverterOptions:
+    """Options for an inverter."""
+
+    # pylint: disable=too-few-public-methods
+    port: str = ""
+    device: str = ""
+    serial_nr: str = ""
+    modbus_id: int = 0
+    ha_prefix: str = ""
+
+    @classmethod
+    def factory(cls, opt: dict) -> InverterOptions:
+        """Create a class from the options."""
+        opt2 = {k.lower(): v for k, v in opt.items()}
+        return InverterOptions(**opt2)
 
 
 @attr.define(slots=True)
@@ -21,10 +39,9 @@ class Options:
     mqtt_username: str = ""
     mqtt_password: str = ""
     number_entity_mode: str = "auto"
-    sunsynk_id: str = ""
+    inverters: list[InverterOptions] = []
     sensors: list[str] = []
     read_sensors_batch_size: int = 60
-    profiles: list[str] = []
     sensor_prefix: str = ""
     timeout: int = 10
     debug: int = 1
@@ -32,18 +49,21 @@ class Options:
     device: str = ""
     modbus_server_id: int = 1
     driver: str = "umodbus"
+    manufacturer: str = "Sunsynk"
 
     def update(self, json: dict) -> None:
         """Update options."""
         for key, val in json.items():
+            if key == "INVERTERS":
+                self.inverters = list(map(InverterOptions.factory, val))
+                continue
             setattr(self, key.lower(), val)
-        self.sunsynk_id = slug(self.sunsynk_id)
 
 
 OPT = Options()
 
 
-def init_options():
+def init_options() -> None:
     """Initialize the options & logger."""
     logging.basicConfig(
         format="%(asctime)s %(levelname)-7s %(message)s", level=logging.DEBUG
@@ -62,9 +82,6 @@ def init_options():
         localf = Path(__file__).parent.parent / ".local.yaml"
         if localf.exists():
             OPT.update(yaml.safe_load(localf.read_text()))
-
-    if OPT.profiles:
-        _LOGGER.info("PROFILES were deprecated. Please remove this configuration.")
 
     if OPT.debug < 2:
         logging.basicConfig(

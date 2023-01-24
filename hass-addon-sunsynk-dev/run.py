@@ -6,12 +6,12 @@ import sys
 import traceback
 from asyncio.events import AbstractEventLoop
 from collections import defaultdict
-from typing import Sequence
+from typing import Iterable, OrderedDict
 
 from filter import RROBIN, Filter, getfilter, suggested_filter
 from mqtt import MQTT, Device
 from options import OPT, init_options
-from state import SENSOR_PREFIX, SENSOR_WRITE_QUEUE, SS_TOPIC, State, TimeoutState
+from state import SENSOR_PREFIX, SENSOR_WRITE_QUEUE, SS, SS_TOPIC, State, TimeoutState
 
 from sunsynk.definitions import (
     ALL_SENSORS,
@@ -21,46 +21,43 @@ from sunsynk.definitions import (
     WATT,
     MathSensor,
 )
-from sunsynk.helpers import slug
+from sunsynk.helpers import ValType, slug
 from sunsynk.rwsensors import RWSensor
 from sunsynk.sunsynk import Sensor, Sunsynk
-
-SUNSYNK: Sunsynk = None  # type: ignore
 
 _LOGGER = logging.getLogger(__name__)
 
 
-HASS_DISCOVERY_INFO_UPDATE_QUEUE: set[str] = set()
-# SERIAL = ALL_SENSORS["serial"]
-STARTUP_SENSORS: list[Sensor] = []
+HASS_DISCOVERY_INFO_UPDATE_QUEUE: set[Sensor] = set()
+STARTUP_SENSORS: set[Sensor] = {RATED_POWER, SERIAL}
 STATES: dict[str, State] = {}
 
 
-async def publish_sensors(states: list[State], *, force: bool = False) -> None:
+async def publish_sensors(states: Iterable[State], *, force: bool = False) -> None:
     """Publish state to HASS."""
     for state in states:
         if state.hidden or state.sensor is None:
             continue
-        val = SUNSYNK.state[state.sensor]
+        val = SS[0].state[state.sensor]
         if isinstance(state.filter, Filter):
             val = state.filter.update(val)
             if force and val is None:
-                val = SUNSYNK.state[state.sensor]
+                val = SS[0].state[state.sensor]
         await state.publish(val)
 
     # statistics
-    await STATES["to"].publish(SUNSYNK.timeouts)
+    await STATES["to"].publish(SS[0].timeouts)
 
 
 async def hass_discover_sensors(serial: str, rated_power: float) -> None:
     """Discover all sensors."""
     dev = Device(
-        identifiers=[OPT.sunsynk_id],
-        name=f"Sunsynk Inverter {serial}",
+        identifiers=[OPT.inverters[0].serial_nr],
+        name=f"{OPT.manufacturer} Inverter {serial}",
         model=f"{int(rated_power/1000)}kW Inverter {serial}",
-        manufacturer="Sunsynk",
+        manufacturer=OPT.manufacturer,
     )
-    SENSOR_PREFIX[OPT.sunsynk_id] = OPT.sensor_prefix
+    SENSOR_PREFIX[OPT.inverters[0].serial_nr] = OPT.sensor_prefix
     ents = [s.create_entity(dev) for s in STATES.values() if not s.hidden]
     await MQTT.connect(OPT)
     await MQTT.publish_discovery_info(entities=ents)
@@ -68,48 +65,72 @@ async def hass_discover_sensors(serial: str, rated_power: float) -> None:
 
 async def hass_update_discovery_info() -> None:
     """Update discovery info for existing sensors"""
-    states = [STATES[n] for n in HASS_DISCOVERY_INFO_UPDATE_QUEUE]
+    states = [STATES[n.id] for n in HASS_DISCOVERY_INFO_UPDATE_QUEUE]
     HASS_DISCOVERY_INFO_UPDATE_QUEUE.clear()
-    ents = [s.create_entity(s.entity.device) for s in states if not s.hidden]
+    ents = [s.create_entity(s.entity) for s in states if not s.hidden]
     await MQTT.connect(OPT)
     await MQTT.publish_discovery_info(entities=ents, remove_entities=False)
 
 
-def enqueue_hass_discovery_info_update(sen: Sensor, deps: list[Sensor]) -> None:
-    """Add a sensor's dependants to the HASS discovery info update queue."""
-    ids = sorted(s.id for s in deps)
+# def enqueue_hass_discovery_info_update(sen: Sensor, deps: list[Sensor]) -> None:
+#     """Add a sensor's dependants to the HASS discovery info update queue."""
+#     ids = sorted(s.id for s in deps)
+#     _LOGGER.debug(
+#         "%s changed: Enqueue discovery info updates for %s", sen.name, ", ".join(ids)
+#     )
+#     HASS_DISCOVERY_INFO_UPDATE_QUEUE.update(ids)
+
+
+SENSOR_DEPENDANTS: dict[Sensor, list[Sensor]] = defaultdict(list)
+"""Sensor dependencies. Changes in the sensor used as key, affects sensors in the list."""
+
+
+def sensor_updates(sen: Sensor, _new: ValType, _old: ValType) -> None:
+    """React to sensor updates."""
+    if sen not in SENSOR_DEPENDANTS:
+        return
+    deps = SENSOR_DEPENDANTS[sen]
     _LOGGER.debug(
-        "%s changed: Enqueue discovery info updates for %s", sen.name, ", ".join(ids)
+        "%s changed: Enqueue discovery info updates for %s",
+        sen.name,
+        ", ".join(s.id for s in deps),
     )
-    HASS_DISCOVERY_INFO_UPDATE_QUEUE.update(ids)
+    HASS_DISCOVERY_INFO_UPDATE_QUEUE.update(deps)
 
 
 def setup_driver() -> None:
     """Setup the correct driver."""
     # pylint: disable=import-outside-toplevel
-    global SUNSYNK  # pylint: disable=global-statement
+
+    factory = Sunsynk
+    port_prefix = ""
+
     if OPT.driver == "pymodbus":
         from sunsynk.pysunsynk import pySunsynk
 
-        SUNSYNK = pySunsynk()
-        if not OPT.port:
-            OPT.port = OPT.device
-
+        factory = pySunsynk  # type:ignore
     elif OPT.driver == "umodbus":
         from sunsynk.usunsynk import uSunsynk
 
-        SUNSYNK = uSunsynk()
-        if not OPT.port:
-            OPT.port = "serial://" + OPT.device
-
+        factory = uSunsynk  # type:ignore
+        port_prefix = "serial://"
     else:
         _LOGGER.critical("Invalid DRIVER: %s. Expected umodbus, pymodbus", OPT.driver)
         sys.exit(-1)
 
-    SUNSYNK.port = OPT.port
-    SUNSYNK.server_id = OPT.modbus_server_id
-    SUNSYNK.timeout = OPT.timeout
-    SUNSYNK.read_sensors_batch_size = OPT.read_sensors_batch_size
+    for opt in OPT.inverters:
+
+        kwargs: OrderedDict = {  # type:ignore
+            "port": opt.port if opt.port else port_prefix + opt.device,
+            "server_id": opt.modbus_id,
+            "timeout": OPT.timeout,
+            "read_sensors_batch_size": OPT.read_sensors_batch_size,
+        }
+        suns = factory(**kwargs)
+        suns.state.onchange = sensor_updates
+
+        SS.append(suns)
+
     STATES["to"] = TimeoutState(entity=None, filter=None, sensor=None)
 
 
@@ -117,9 +138,6 @@ def setup_sensors() -> None:
     """Setup the sensors."""
     # pylint: disable=too-many-branches
     sens: dict[str, Filter] = {}
-    sens_dependants: dict[str, list[Sensor]] = defaultdict(list)
-    startup_sens = {SERIAL.id, RATED_POWER.id}
-
     msg: dict[str, list[str]] = defaultdict(list)
 
     # Add test sensors
@@ -137,7 +155,7 @@ def setup_sensors() -> None:
             log_bold(f"Unknown sensor in config: {sensor_def}")
             continue
         if sen.id in DEPRECATED:
-            log_bold(f"Sensor deprecated: {sen.id} -> {DEPRECATED[sen.id].id}")
+            log_bold(f"Sensor {sen.id} deprecated, rather use {DEPRECATED[sen.id].id}")
         if not fstr:
             fstr = suggested_filter(sen)
             msg[f"*{fstr}"].append(name)  # type: ignore
@@ -148,33 +166,26 @@ def setup_sensors() -> None:
         STATES[sen.id] = State(
             sensor=sen, filter=filt, retain=isinstance(sen, RWSensor)
         )
+        SS[0].state.track(sen)
         sens[sen.id] = filt
 
-        if isinstance(sen, RWSensor):
-            for dep in sen.dependencies:
-                sens_dependants[dep.id].append(sen)
+        if not isinstance(sen, RWSensor):
+            continue
+        for dep in sen.dependencies:
+            if dep in (RATED_POWER, SERIAL):  # These sensors never change
+                continue
+            if sen not in SENSOR_DEPENDANTS[dep]:
+                SENSOR_DEPENDANTS[dep].append(sen)
+            STARTUP_SENSORS.add(dep)
+            SS[0].state.track(dep)
+            if dep.id in STATES:
+                continue
+            fstr = suggested_filter(dep)
+            msg[f"*{fstr}"].append(dep.id)  # type: ignore
+            filt = getfilter(fstr, sensor=dep)
+            STATES[dep.id] = State(sensor=dep, hidden=True, filter=filt)
+            _LOGGER.info("Added hidden sensor %s as other sensors depend on it", dep.id)
 
-    for sen_id, deps in sens_dependants.items():
-        if sen_id not in ALL_SENSORS:
-            _LOGGER.fatal("Invalid sensor as dependency - %s", sen_id)
-        sen = ALL_SENSORS[sen_id]
-
-        if sen_id not in sens and sen != RATED_POWER:  # Rated power does not change
-            fstr = suggested_filter(sen)
-            msg[f"*{fstr}"].append(name)  # type: ignore
-            filt = getfilter(fstr, sensor=sen)
-            STATES[sen.id] = State(
-                sensor=sen, filter=filt, retain=isinstance(sen, RWSensor), hidden=True
-            )
-            sens[sen.id] = filt
-            _LOGGER.info("Added hidden sensor %s as other sensors depend on it", sen_id)
-
-        startup_sens.add(sen_id)
-        sen.on_change = lambda s=sen, d=deps: enqueue_hass_discovery_info_update(s, d)
-
-    # Add any sensor dependencies to STARTUP_SENSORS
-    STARTUP_SENSORS.clear()
-    STARTUP_SENSORS.extend(ALL_SENSORS[n] for n in startup_sens)
     for nme, val in msg.items():
         _LOGGER.info("Filter %s used for %s", nme, ", ".join(sorted(val)))
 
@@ -190,12 +201,12 @@ READ_ERRORS = 0
 
 
 async def read_sensors(
-    sensors: Sequence[Sensor], msg: str = "", retry_single: bool = False
+    sensors: Iterable[Sensor], msg: str = "", retry_single: bool = False
 ) -> bool:
     """Read from the Modbus interface."""
     global READ_ERRORS  # pylint:disable=global-statement
     try:
-        await SUNSYNK.read_sensors(sensors)
+        await SS[0].read_sensors(sensors)
         READ_ERRORS = 0
         return True
     except asyncio.TimeoutError:
@@ -229,9 +240,9 @@ async def main(loop: AbstractEventLoop) -> None:  # noqa
     loop.set_debug(OPT.debug > 0)
 
     try:
-        await SUNSYNK.connect()
+        await SS[0].connect()
     except ConnectionError:
-        log_bold(f"Could not connect to {SUNSYNK.port}")
+        log_bold(f"Could not connect to {SS[0].port}")
         _LOGGER.critical(TERM)
         await asyncio.sleep(30)
         return
@@ -242,28 +253,31 @@ async def main(loop: AbstractEventLoop) -> None:  # noqa
 
     if not await read_sensors(STARTUP_SENSORS):
         log_bold(
-            f"No response on the Modbus interface {SUNSYNK.port}, try checking the "
+            f"No response on the Modbus interface {SS[0].port}, try checking the "
             "wiring to the Inverter, the USB-to-RS485 converter, etc"
         )
         _LOGGER.critical(TERM)
         await asyncio.sleep(30)
         return
 
-    log_bold(f"Inverter serial number '{SUNSYNK.state[SERIAL]}'")
+    log_bold(f"Inverter serial number '{SS[0].state[SERIAL]}'")
 
-    if OPT.sunsynk_id != SUNSYNK.state[SERIAL] and not OPT.sunsynk_id.startswith("_"):
-        log_bold("SUNSYNK_ID should be set to the serial number of your Inverter!")
+    if OPT.inverters[0].serial_nr != SS[0].state[SERIAL] and not OPT.inverters[
+        0
+    ].serial_nr.startswith("_"):
+        log_bold("SS[0].ID should be set to the serial number of your Inverter!")
         return
 
     powr = float(5000)
     try:
-        powr = float(SUNSYNK.state[RATED_POWER])  # type:ignore
+        powr = float(SS[0].state[RATED_POWER])  # type:ignore
     except (ValueError, TypeError):
         pass
 
     # Start MQTT
-    MQTT.availability_topic = f"{SS_TOPIC}/{OPT.sunsynk_id}/availability"
-    await hass_discover_sensors(str(SUNSYNK.state[SERIAL]), powr)
+    serial_nr0 = OPT.inverters[0].serial_nr
+    MQTT.availability_topic = f"{SS_TOPIC}/{serial_nr0}/availability"
+    await hass_discover_sensors(str(SS[0].state[SERIAL]), powr)
 
     # Read all & publish immediately
     await asyncio.sleep(0.01)
@@ -277,7 +291,9 @@ async def main(loop: AbstractEventLoop) -> None:  # noqa
 
         while SENSOR_WRITE_QUEUE:
             sensor, value = SENSOR_WRITE_QUEUE.popitem()
-            await SUNSYNK.write_sensor(sensor, value)  # , msg=f"[old {old_reg_value}]")
+            if not isinstance(sensor, RWSensor):
+                continue
+            await SS[0].write_sensor(sensor, value)  # , msg=f"[old {old_reg_value}]")
             await read_sensors([sensor], msg=sensor.name)
             await publish_sensors([STATES[sensor.id]], force=True)
 
@@ -291,7 +307,7 @@ async def main(loop: AbstractEventLoop) -> None:  # noqa
                 states.append(state)
         if states:
             # 2. read
-            if await read_sensors([s.sensor for s in states]):
+            if await read_sensors([s.sensor for s in states if s.sensor]):
                 # 3. decode & publish
                 await publish_sensors(states)
 

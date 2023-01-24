@@ -1,12 +1,13 @@
 """Filters."""
 import logging
 from statistics import mean
-from typing import Any, List, Optional, Sequence, Union
+from typing import Any, List, Sequence
 
 import attr
 from options import OPT
 
 from sunsynk.definitions import ALL_SENSORS, AMPS, CELSIUS, KWH, VOLT, WATT, Sensor
+from sunsynk.helpers import ValType
 from sunsynk.rwsensors import RWSensor
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class Filter:
             nme += ":step"
         return f"{nme}:{self._filter.__name__}"  # pylint: disable=no-member
 
-    def update(self, value: Union[float, int, str]) -> Optional[Union[float, int, str]]:
+    def update(self, value: ValType) -> ValType:
         """Add value."""
         if value is None:
             _LOGGER.warning("%s: should not be None", self.name)
@@ -80,7 +81,7 @@ class SCFilter(Filter):
 
     threshold: int = attr.field(default=50)
 
-    def update(self, value: Union[float, int, str]) -> Optional[Union[float, int, str]]:
+    def update(self, value: ValType) -> ValType:
         """Add value."""
         val0 = self.values[0] if self.values else 0
         try:
@@ -131,7 +132,7 @@ class RoundRobinFilter(Filter):
         """Should we update this sensor."""
         return self in RROBIN.active
 
-    def update(self, value: Union[float, int, str]) -> Optional[Union[float, int, str]]:
+    def update(self, value: ValType) -> ValType:
         """Add value."""
         if self.values:
             val0 = self.values[0]

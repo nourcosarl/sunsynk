@@ -1,6 +1,8 @@
 """Register state."""
 import logging
-from typing import Callable, Generator, Sequence
+
+# from collections.abc import KeysView
+from typing import Callable, Generator, Iterable, Iterator, Optional, Sequence
 
 import attr
 
@@ -16,7 +18,9 @@ class InverterState:
 
     values: dict[Sensor, ValType] = attr.field(factory=dict)
     registers: dict[int, int] = attr.field(factory=dict)
-    onchange: Callable[[Sensor, ValType, ValType], None] = attr.field(default=None)
+    onchange: Optional[Callable[[Sensor, ValType, ValType], None]] = attr.field(
+        default=None
+    )
 
     def __getitem__(self, sensor: Sensor) -> ValType:
         """Get the current value of a sensor."""
@@ -35,9 +39,9 @@ class InverterState:
                     self.values.setdefault(dep, None)
 
     @property
-    def sensors(self) -> Generator:
+    def sensors(self) -> Iterator[Sensor]:
         """Get a generator of all sensors."""
-        return self.values.keys()
+        return iter(self.values.keys())
 
     def update(self, new_regs: dict[int, int]) -> None:
         """Update the state."""
@@ -73,7 +77,7 @@ class InverterState:
 
 
 def group_sensors(
-    sensors: Sequence[Sensor], allow_gap: int = 3, max_group_size: int = 60
+    sensors: Iterable[Sensor], allow_gap: int = 3, max_group_size: int = 60
 ) -> Generator[list[int], None, None]:
     """Group sensor registers into blocks for reading."""
     if not sensors:

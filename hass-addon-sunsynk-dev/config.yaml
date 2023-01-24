@@ -19,13 +19,13 @@ host_network: false
 map:
   - share:rw
 options:
-  PORT: ""
-  DEVICE: ""
   DRIVER: "umodbus"
   INVERTERS:
-    - SERIAL: "007"
-      PREFIX: SS
+    - SERIAL_NR: "007"
+      HA_PREFIX: SS
       MODBUS_ID: 1
+      PORT: ""
+      DEVICE: ""
   SENSORS:
     - total_pv_power
     - total_battery_charge
@@ -33,6 +33,7 @@ options:
     - total_grid_export
     - total_grid_import
     - battery_soc
+  MANUFACTURER: Sunsynk
   READ_SENSORS_BATCH_SIZE: 60
   NUMBER_ENTITY_MODE: "auto"
   MQTT_HOST: core-mosquitto
@@ -41,15 +42,16 @@ options:
   MQTT_PASSWORD: ""
   DEBUG: 0
 schema:
-  PORT: str?
-  DEVICE: device(subsystem=tty)?
   DRIVER: str?
   INVERTERS:
-    - SERIAL: str
-      PREFIX: str
-      MODBUS_ID: int
+    - SERIAL_NR: str
+      HA_PREFIX: str
+      MODBUS_ID: int(1,10)
+      PORT: str?
+      DEVICE: device(subsystem=tty)?
   SENSORS:
     - str
+  MANUFACTURER: str(5,)
   READ_SENSORS_BATCH_SIZE: int?
   NUMBER_ENTITY_MODE: list(auto|box|slider)?
   MQTT_HOST: str

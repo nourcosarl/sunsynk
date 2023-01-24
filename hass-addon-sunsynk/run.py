@@ -26,7 +26,7 @@ from options import OPT, SS_TOPIC
 from profiles import profile_add_entities, profile_poll
 
 from sunsynk.definitions import ALL_SENSORS, DEPRECATED, RATED_POWER
-from sunsynk.sensor import NumberRWSensor, RWSensor, SelectRWSensor, TimeRWSensor, slug
+from sunsynk.sensors import NumberRWSensor, RWSensor, SelectRWSensor, TimeRWSensor, slug
 from sunsynk.sunsynk import Sensor, Sunsynk
 
 _LOGGER = logging.getLogger(__name__)

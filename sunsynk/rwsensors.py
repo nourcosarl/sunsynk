@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Generator
+from typing import Callable, Generator, Union
 
 import attr
 
-from sunsynk.helpers import SSTime
-from sunsynk.sensors import RegType, Sensor, ValType
+from sunsynk.helpers import NumType, RegType, SSTime, ValType, as_num
+from sunsynk.sensors import Sensor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,8 +65,10 @@ class NumberRWSensor(RWSensor):
         self, value: ValType, resolve: Callable[[Sensor, ValType], ValType]
     ) -> RegType:
         """Get the reg value from a display value, or the current reg value if out of range."""
-        minv = float(resolve(self.min, 0) if isinstance(self.min, Sensor) else self.min)
-        maxv = float(resolve(self.max, 0) if isinstance(self.max, Sensor) else self.max)
+        if value is None or isinstance(value, str):
+            raise TypeError
+        minv = resolve_num(resolve, self.min, 0)
+        maxv = resolve_num(resolve, self.max, 100)
         val = int(max(minv, min(maxv, value / abs(self.factor))))
         if len(self.address) == 1:
             return (val,)
@@ -93,11 +95,12 @@ class SelectRWSensor(RWSensor):
         for reg, val in self.options.items():
             if val == value:
                 return (reg,)
+        # Unknown value, try to get the existing value
         _LOGGER.warning("Unknown %s", value)
-        if resolve:
-            current = resolve(self, None)
-            return self.value_to_reg(current, None)
-        return None
+        if resolve is None:
+            return None
+        current = resolve(self, None)
+        return self.value_to_reg(current, None)  # type:ignore
 
     def reg_to_value(self, regs: RegType) -> ValType:
         """Decode the register."""
@@ -124,7 +127,7 @@ class TimeRWSensor(RWSensor):
         max_val = (
             SSTime(string=str(resolve(self.max, 0))).minutes if self.max else full_day
         )
-        val = SSTime(string=resolve(self, 0)).minutes
+        val = SSTime(string=str(resolve(self, 0))).minutes
 
         time_range = self._range(min_val, max_val, val, step_minutes, full_day)
         return list(map(lambda m: SSTime(minutes=m).str_value, time_range))
@@ -142,7 +145,7 @@ class TimeRWSensor(RWSensor):
         self, value: ValType, resolve: Callable[[Sensor, ValType], ValType]
     ) -> RegType:
         """Get the reg value from a display value."""
-        return (SSTime(string=value).reg_value,)
+        return (SSTime(string=str(value)).reg_value,)
 
     @staticmethod
     def _range(
@@ -155,3 +158,17 @@ class TimeRWSensor(RWSensor):
             yield i % modulo
         if start == end or start != end % modulo:
             yield end
+
+
+def resolve_num(
+    resolve: Callable[[Sensor, ValType], ValType],
+    val: Union[NumType, Sensor],
+    default: NumType = 0,
+) -> NumType:
+    """Resolve a number helper."""
+    if isinstance(val, (int, float)):
+        return val
+    if isinstance(val, Sensor):
+        res = resolve(val, default)
+        return as_num(res)
+    return as_num(val)
