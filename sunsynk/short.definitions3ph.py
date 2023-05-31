@@ -1,54 +1,16 @@
-"""Sunsynk 5kW&8kW hybrid 3-phase inverter sensor definitions."""
-# pylint: disable=duplicate-code
-from sunsynk import AMPS, CELSIUS, KWH, VOLT, WATT
-from sunsynk.rwsensors import (
-    NumberRWSensor,
-    SelectRWSensor,
-    SwitchRWSensor,
-    TimeRWSensor,
-)
-from sunsynk.sensors import (
-    FaultSensor,
-    InverterStateSensor,
-    MathSensor,
-    SDStatusSensor,
-    Sensor,
-    SensorDefinitions,
-    SerialSensor,
-    TempSensor,
-)
-
-SENSORS = SensorDefinitions()
-
-##########
-# Battery
-##########
-SENSORS += (
-    TempSensor(586, "Battery temperature", CELSIUS, 0.1),
-    Sensor(587, "Battery voltage", VOLT, 0.01),
-    Sensor(588, "Battery SOC", "%"),
-    Sensor(590, "Battery power", WATT, -1),
-    Sensor(591, "Battery current", AMPS, -0.01),
-)
-
-#################
-# Inverter Power
-#################
-SENSORS += (
-    Sensor(636, "Inverter power", WATT, -1),
-    Sensor(633, "Inverter L1 power", WATT, -1),
-    Sensor(634, "Inverter L2 power", WATT, -1),
-    Sensor(635, "Inverter L3 power", WATT, -1),
-    Sensor(627, "Inverter voltage", VOLT, 0.1),
-    Sensor(638, "Inverter frequency", "Hz", 0.01),
-)
-
-#############
-# Grid Power
-#############
-SENSORS += (
-    Sensor(609, "Grid frequency", "Hz", 0.01),
-    Sensor(625, "Grid power", WATT, -1),  # gridTotalPac
+  - Battery_temperature
+  - Battery_voltage
+  - Battery_SOC
+  - Battery_power
+  - Battery_current
+  - Inverter_power
+  - Inverter_L1_power
+  - Inverter_L2_power
+  - Inverter_L3_power
+  - Inverter_voltage
+  - Inverter_frequency
+  - Grid_frequency"
+  - Grid power", WATT, -1),  # gridTotalPac
     Sensor(622, "Grid L1 power", WATT, -1),  # aPower
     Sensor(623, "Grid L2 power", WATT, -1),  # bPower
     Sensor(624, "Grid L3 power", WATT, -1),  # cPower
